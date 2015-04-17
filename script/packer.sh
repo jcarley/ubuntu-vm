@@ -1,6 +1,6 @@
 #!/bin/bash
 
-version='0.6.1'
+version='0.7.5'
 
 # install wget
 sudo apt-get update
