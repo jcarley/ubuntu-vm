@@ -3,7 +3,7 @@
     "cm": "nocm",
     "cm_version": "",
     "cleanup_pause": "",
-    "headless": "",
+    "headless": "true",
     "update": "false",
     "http_proxy": "{{env `http_proxy`}}",
     "https_proxy": "{{env `https_proxy`}}",
