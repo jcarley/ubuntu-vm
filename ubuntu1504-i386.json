@@ -22,12 +22,12 @@
         " passwd/user-password={{ user `ssh_password` }}",
         " passwd/user-password-again={{ user `ssh_password` }}",
         " passwd/username={{ user `ssh_username` }}",
-        " preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed.cfg",
+        " preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed-1504.cfg",
         " -- ",
         "<enter>"
       ],
       "disk_size": 10140,
-      "guest_os_type": "ubuntu-64",
+      "guest_os_type": "ubuntu",
       "headless": "{{ user `headless` }}",
       "http_directory": "http",
       "iso_checksum": "{{ user `iso_checksum` }}",
@@ -42,7 +42,7 @@
       "ssh_wait_timeout": "10000s",
       "tools_upload_flavor": "linux",
       "type": "vmware-iso",
-      "vm_name": "ubuntu1204-docker",
+      "vm_name": "ubuntu1504-i386",
       "vmx_data": {
         "memsize": "512",
         "numvcpus": "1"
@@ -66,7 +66,7 @@
       ],
       "disk_size": 10140,
       "guest_additions_path": "VBoxGuestAdditions_{{.Version}}.iso",
-      "guest_os_type": "Ubuntu_64",
+      "guest_os_type": "Ubuntu",
       "hard_drive_interface": "sata",
       "headless": "{{ user `headless` }}",
       "http_directory": "http",
@@ -96,7 +96,7 @@
         ]
       ],
       "virtualbox_version_file": ".vbox_version",
-      "vm_name": "ubuntu1204-docker"
+      "vm_name": "ubuntu1504-i386"
     },
     {
       "boot_command": [
@@ -144,13 +144,13 @@
       "ssh_username": "{{ user `ssh_username` }}",
       "ssh_wait_timeout": "10000s",
       "type": "parallels-iso",
-      "vm_name": "ubuntu1204-docker"
+      "vm_name": "ubuntu1504-i386"
     }
   ],
   "post-processors": [
     {
       "keep_input_artifact": false,
-      "output": "box/{{.Provider}}/ubuntu1204-docker-{{user `cm`}}{{user `cm_version`}}-{{user `version`}}.box",
+      "output": "box/{{.Provider}}/ubuntu1504-i386-{{user `cm`}}{{user `cm_version`}}-{{user `version`}}.box",
       "type": "vagrant"
     }
   ],
@@ -176,7 +176,7 @@
         "script/vagrant.sh",
         "script/sshd.sh",
         "script/vmtool.sh",
-        "script/docker.sh",
+        "script/minimize.sh",
         "script/cleanup.sh",
         "script/cmtool.sh"
       ],
@@ -193,10 +193,10 @@
     "http_proxy": "{{env `http_proxy`}}",
     "https_proxy": "{{env `https_proxy`}}",
     "install_vagrant_key": true,
-    "iso_checksum": "7540ace2d6cdee264432f5ed987236d32edef798",
-    "iso_name": "ubuntu-12.04.5-server-amd64.iso",
+    "iso_checksum": "c08716602facd6b95792f73a2735647a693135af",
+    "iso_name": "ubuntu-15.04-server-i386.iso",
     "iso_path": "iso",
-    "iso_url": "http://releases.ubuntu.com/12.04/ubuntu-12.04.5-server-amd64.iso",
+    "iso_url": "http://releases.ubuntu.com/15.04/ubuntu-15.04-server-i386.iso",
     "no_proxy": "{{env `no_proxy`}}",
     "rsync_proxy": "{{env `rsync_proxy`}}",
     "hostname": "vagrant",

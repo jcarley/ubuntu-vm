@@ -3,17 +3,7 @@ ifneq ("$(wildcard Makefile.local)", "")
 	include Makefile.local
 endif
 
-UBUNTU1004_SERVER_AMD64 ?= http://releases.ubuntu.com/10.04.4/ubuntu-10.04.4-server-amd64.iso
-UBUNTU1004_SERVER_I386 ?= http://releases.ubuntu.com/10.04.4/ubuntu-10.04.4-server-i386.iso
-UBUNTU1204_SERVER_AMD64 ?= http://releases.ubuntu.com/12.04/ubuntu-12.04.4-server-amd64.iso
-UBUNTU1204_SERVER_I386 ?= http://releases.ubuntu.com/12.04/ubuntu-12.04.4-server-i386.iso
-UBUNTU1204_ALTERNATE_AMD64 ?= http://releases.ubuntu.com/12.04/ubuntu-12.04.4-alternate-amd64.iso
-UBUNTU1304_SERVER_AMD64 ?= http://releases.ubuntu.com/13.04/ubuntu-13.04-server-amd64.iso
-UBUNTU1304_SERVER_I386 ?= http://releases.ubuntu.com/13.04/ubuntu-13.04-server-i386.iso
-UBUNTU1310_SERVER_AMD64 ?= http://releases.ubuntu.com/13.10/ubuntu-13.10-server-amd64.iso
-UBUNTU1310_SERVER_I386 ?= http://releases.ubuntu.com/13.10/ubuntu-13.10-server-i386.iso
-UBUNTU1404_SERVER_AMD64 ?= http://releases.ubuntu.com/14.04/ubuntu-14.04.1-server-amd64.iso
-UBUNTU1404_SERVER_I386 ?= http://releases.ubuntu.com/14.04/ubuntu-14.04.1-server-i386.iso
+PACKER ?= packer
 
 # Possible values for CM: (nocm | chef | chefdk | salt | puppet)
 CM ?= nocm
@@ -24,38 +14,86 @@ ifndef CM_VERSION
 		CM_VERSION = latest
 	endif
 endif
-HEADLESS ?=
-AUTO_UPGRADE ?=
-# Packer does not allow empty variables, so only pass variables that are defined
-ifdef CM_VERSION
-	PACKER_VARS := -var 'cm=$(CM)' -var 'cm_version=$(CM_VERSION)' -var 'headless=$(HEADLESS)' -var 'update=$(UPDATE)'
-else
-	PACKER_VARS := -var 'cm=$(CM)' -var 'headless=$(HEADLESS)' -var 'update=$(UPDATE)'
-endif
+BOX_VERSION ?= $(shell cat VERSION)
 ifeq ($(CM),nocm)
-	BOX_SUFFIX := -$(CM).box
+	BOX_SUFFIX := -$(CM)-$(BOX_VERSION).box
 else
-	BOX_SUFFIX := -$(CM)$(CM_VERSION).box
+	BOX_SUFFIX := -$(CM)$(CM_VERSION)-$(BOX_VERSION).box
 endif
-BUILDER_TYPES := vmware virtualbox
+
+# Packer does not allow empty variables, so only pass variables that are defined
+PACKER_VARS_LIST = 'cm=$(CM)' 'version=$(BOX_VERSION)'
+ifdef CM_VERSION
+	PACKER_VARS_LIST += 'cm_version=$(CM_VERSION)'
+endif
+ifdef CUSTOM_SCRIPT
+	PACKER_VARS_LIST += 'custom_script=$(CUSTOM_SCRIPT)'
+endif
+ifdef HEADLESS
+	PACKER_VARS_LIST += 'headless=$(HEADLESS)'
+endif
+ifdef INSTALL_VAGRANT_KEY
+	PACKER_VARS_LIST += 'install_vagrant_key=$(INSTALL_VAGRANT_KEY)'
+endif
+ifdef ISO_PATH
+	PACKER_VARS_LIST += 'iso_path=$(ISO_PATH)'
+endif
+ifdef SSH_FULLNAME
+	PACKER_VARS_LIST += 'ssh_fullname=${SSH_FULLNAME}'
+endif
+ifdef SSH_PASSWORD
+	PACKER_VARS_LIST += 'ssh_password=$(SSH_PASSWORD)'
+endif
+ifdef SSH_USERNAME
+	PACKER_VARS_LIST += 'ssh_username=$(SSH_USERNAME)'
+endif
+ifdef UPDATE
+	PACKER_VARS_LIST += 'update=$(UPDATE)'
+endif
+
+PACKER_VARS := $(addprefix -var , $(PACKER_VARS_LIST))
+ifdef PACKER_DEBUG
+	PACKER_CMD := PACKER_LOG=1 $(PACKER) --debug
+else
+	PACKER_CMD := $(PACKER)
+endif
+BUILDER_TYPES ?= vmware virtualbox parallels
 TEMPLATE_FILENAMES := $(wildcard *.json)
 BOX_FILENAMES := $(TEMPLATE_FILENAMES:.json=$(BOX_SUFFIX))
-BOX_FILES := $(foreach builder, $(BUILDER_TYPES), $(foreach box_filename, $(BOX_FILENAMES), box/$(builder)/$(box_filename)))
-TEST_BOX_FILES := $(foreach builder, $(BUILDER_TYPES), $(foreach box_filename, $(BOX_FILENAMES), test-box/$(builder)/$(box_filename)))
-VMWARE_BOX_DIR := box/vmware
-VIRTUALBOX_BOX_DIR := box/virtualbox
-VMWARE_OUTPUT := output-vmware-iso
-VIRTUALBOX_OUTPUT := output-virtualbox-iso
+VMWARE_BOX_DIR ?= box/vmware
+VIRTUALBOX_BOX_DIR ?= box/virtualbox
+PARALLELS_BOX_DIR ?= box/parallels
+VMWARE_TEMPLATE_FILENAMES = $(filter-out ubuntu1504-docker.json ubuntu1504-i386.json ubuntu1504-desktop.json ubuntu1504.json,$(TEMPLATE_FILENAMES))
+VMWARE_BOX_FILENAMES := $(VMWARE_TEMPLATE_FILENAMES:.json=$(BOX_SUFFIX))
+VMWARE_BOX_FILES := $(foreach box_filename, $(VMWARE_BOX_FILENAMES), $(VMWARE_BOX_DIR)/$(box_filename))
+VIRTUALBOX_BOX_FILES := $(foreach box_filename, $(BOX_FILENAMES), $(VIRTUALBOX_BOX_DIR)/$(box_filename))
+PARALLELS_TEMPLATE_FILENAMES = $(filter-out ubuntu1504-desktop.json ubuntu1504-docker.json ubuntu1504-i386.json ubuntu1504.json,$(TEMPLATE_FILENAMES))
+PARALLELS_BOX_FILENAMES := $(PARALLELS_TEMPLATE_FILENAMES:.json=$(BOX_SUFFIX))
+PARALLELS_BOX_FILES := $(foreach box_filename, $(PARALLELS_BOX_FILENAMES), $(PARALLELS_BOX_DIR)/$(box_filename))
+BOX_FILES := $(VMWARE_BOX_FILES) $(VIRTUALBOX_BOX_FILES) $(PARALLELS_BOX_FILES)
+VMWARE_OUTPUT ?= output-vmware-iso
+VIRTUALBOX_OUTPUT ?= output-virtualbox-iso
+PARALLELS_OUTPUT ?= output-parallels-iso
 VMWARE_BUILDER := vmware-iso
 VIRTUALBOX_BUILDER := virtualbox-iso
+PARALLELS_BUILDER := parallels-iso
 CURRENT_DIR = $(shell pwd)
-SOURCES := $(wildcard script/*.sh) $(floppy/*.*) $(http/*.cfg)
+SOURCES := $(wildcard script/*.sh) $(wildcard floppy/*.*) $(wildcard http/*.cfg)
 
-.PHONY: all list clean validate
+.PHONY: \
+	all \
+	clean-builders \
+	clean-output \
+	clean-packer-cache \
+	clean \
+	list \
+	s3cp-parallels \
+	s3cp-virtualbox \
+	s3cp-vmware \
+	test \
+	validate
 
 all: $(BOX_FILES)
-
-test: $(TEST_BOX_FILES)
 
 ###############################################################################
 # Target shortcuts
@@ -73,171 +111,80 @@ test-virtualbox/$(1): test-$(VIRTUALBOX_BOX_DIR)/$(1)$(BOX_SUFFIX)
 
 ssh-virtualbox/$(1): ssh-$(VIRTUALBOX_BOX_DIR)/$(1)$(BOX_SUFFIX)
 
-$(1): vmware/$(1) virtualbox/$(1)
+parallels/$(1): $(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
 
-test-$(1): test-vmware/$(1) test-virtualbox/$(1)
+test-parallels/$(1): test-$(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+ssh-parallels/$(1): ssh-$(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+$(1): vmware/$(1) virtualbox/$(1) parallels/$(1)
+
+test-$(1): test-vmware/$(1) test-virtualbox/$(1) test-parallels/$(1)
+
+s3cp-$(1): s3cp-$(VMWARE_BOX_DIR)/$(1)$(BOX_SUFFIX) s3cp-$(VIRTUALBOX_BOX_DIR)/$(1)$(BOX_SUFFIX) s3cp-$(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+s3cp-vmware/$(1): s3cp-$(VMWARE_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+s3cp-virtualbox/$(1): s3cp-$(VIRTUALBOX_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+s3cp-parallels/$(1): s3cp-$(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+test-atlas-$(1): test-atlas-$(VMWARE_BOX_DIR)/$(1)$(BOX_SUFFIX) test-atlas-$(VIRTUALBOX_BOX_DIR)/$(1)$(BOX_SUFFIX) test-atlas-$(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+test-atlas-vmware/$(1): test-atlas-$(VMWARE_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+test-atlas-virtualbox/$(1): test-atlas-$(VIRTUALBOX_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+test-atlas-parallels/$(1): test-atlas-$(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+s3cp-$(1): s3cp-$(VMWARE_BOX_DIR)/$(1)$(BOX_SUFFIX) s3cp-$(VIRTUALBOX_BOX_DIR)/$(1)$(BOX_SUFFIX) s3cp-$(PARALLELS_BOX_DIR)/$(1)$(BOX_SUFFIX)
+
+register-atlas-$(1): register-atlas/$(1)$(BOX_SUFFIX)
 
 endef
 
-SHORTCUT_TARGETS := ubuntu1004-i386 ubuntu1004 ubuntu1204-desktop ubuntu1204-docker ubuntu1204-i386 ubuntu1204 ubuntu1404-desktop ubuntu1404-docker ubuntu1404-i386 ubuntu1404
+SHORTCUT_TARGETS := $(basename $(TEMPLATE_FILENAMES))
 $(foreach i,$(SHORTCUT_TARGETS),$(eval $(call SHORTCUT,$(i))))
 
 ###############################################################################
 
-# Generic rule - not used currently
-#$(VMWARE_BOX_DIR)/%$(BOX_SUFFIX): %.json
-#	cd $(dir $<)
-#	rm -rf output-vmware-iso
-#	mkdir -p $(VMWARE_BOX_DIR)
-#	packer build -only=vmware-iso $(PACKER_VARS) $<
-
-$(VMWARE_BOX_DIR)/ubuntu1004-i386$(BOX_SUFFIX): ubuntu1004-i386.json $(SOURCES)
-	cd $(dir $<)
+$(VMWARE_BOX_DIR)/%$(BOX_SUFFIX): %.json $(SOURCES)
 	rm -rf $(VMWARE_OUTPUT)
 	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1004_SERVER_I386)" $<
+	$(PACKER_CMD) build -only=$(VMWARE_BUILDER) $(PACKER_VARS) $<
 
-$(VMWARE_BOX_DIR)/ubuntu1004$(BOX_SUFFIX): ubuntu1004.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1004_SERVER_AMD64)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1204-desktop$(BOX_SUFFIX): ubuntu1204-desktop.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_ALTERNATE_AMD64)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1204-docker$(BOX_SUFFIX): ubuntu1204-docker.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_SERVER_AMD64)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1204-i386$(BOX_SUFFIX): ubuntu1204-i386.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_SERVER_I386)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1204$(BOX_SUFFIX): ubuntu1204.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_SERVER_AMD64)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1404-desktop$(BOX_SUFFIX): ubuntu1404-desktop.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_AMD64)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1404-docker$(BOX_SUFFIX): ubuntu1404-docker.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_AMD64)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1404-i386$(BOX_SUFFIX): ubuntu1404-i386.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_I386)" $<
-
-$(VMWARE_BOX_DIR)/ubuntu1404$(BOX_SUFFIX): ubuntu1404.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VMWARE_OUTPUT)
-	mkdir -p $(VMWARE_BOX_DIR)
-	packer build -only=$(VMWARE_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_AMD64)" $<
-
-# Generic rule - not used currently
-#$(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX): %.json
-#	cd $(dir $<)
-#	rm -rf output-virtualbox-iso
-#	mkdir -p $(VIRTUALBOX_BOX_DIR)
-#	packer build -only=virtualbox-iso $(PACKER_VARS) $<
-	
-$(VIRTUALBOX_BOX_DIR)/ubuntu1004-i386$(BOX_SUFFIX): ubuntu1004-i386.json $(SOURCES)
-	cd $(dir $<)
+$(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX): %.json $(SOURCES)
 	rm -rf $(VIRTUALBOX_OUTPUT)
 	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1004_SERVER_I386)" $<
+	$(PACKER_CMD) build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) $<
 
-$(VIRTUALBOX_BOX_DIR)/ubuntu1004$(BOX_SUFFIX): ubuntu1004.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1004_SERVER_AMD64)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1204-desktop$(BOX_SUFFIX): ubuntu1204-desktop.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_ALTERNATE_AMD64)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1204-docker$(BOX_SUFFIX): ubuntu1204-docker.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_SERVER_AMD64)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1204-i386$(BOX_SUFFIX): ubuntu1204-i386.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_SERVER_I386)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1204$(BOX_SUFFIX): ubuntu1204.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1204_SERVER_AMD64)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1404-desktop$(BOX_SUFFIX): ubuntu1404-desktop.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_AMD64)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1404-docker$(BOX_SUFFIX): ubuntu1404-docker.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_AMD64)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1404-i386$(BOX_SUFFIX): ubuntu1404-i386.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_I386)" $<
-
-$(VIRTUALBOX_BOX_DIR)/ubuntu1404$(BOX_SUFFIX): ubuntu1404.json $(SOURCES)
-	cd $(dir $<)
-	rm -rf $(VIRTUALBOX_OUTPUT)
-	mkdir -p $(VIRTUALBOX_BOX_DIR)
-	packer build -only=$(VIRTUALBOX_BUILDER) $(PACKER_VARS) -var "iso_url=$(UBUNTU1404_SERVER_AMD64)" $<
+$(PARALLELS_BOX_DIR)/%$(BOX_SUFFIX): %.json $(SOURCES)
+	rm -rf $(PARALLELS_OUTPUT)
+	mkdir -p $(PARALLELS_BOX_DIR)
+	$(PACKER_CMD) build -only=$(PARALLELS_BUILDER) $(PACKER_VARS) $<
 
 list:
 	@echo "Prepend 'vmware/' to build only vmware target:"
 	@echo "  make vmware/ubuntu1404"
 	@echo "Prepend 'virtualbox/' to build only virtualbox target:"
 	@echo "  make virtualbox/ubuntu1404"
+	@echo "Prepend 'parallels/' to build only parallels target:"
+	@echo "  make parallels/ubuntu1404"
 	@echo ""
 	@echo "Targets:"
 	@for shortcut_target in $(SHORTCUT_TARGETS) ; do \
 		echo $$shortcut_target ; \
-	done
+	done | sort
 
 validate:
 	@for template_filename in $(TEMPLATE_FILENAMES) ; do \
 		echo Checking $$template_filename ; \
-		packer validate $$template_filename ; \
+		$(PACKER) validate $$template_filename ; \
 	done
 
 
 clean: clean-builders clean-output clean-packer-cache
-		
+
 clean-builders:
 	@for builder in $(BUILDER_TYPES) ; do \
 		if test -d box/$$builder ; then \
@@ -245,13 +192,13 @@ clean-builders:
 			find box/$$builder -maxdepth 1 -type f -name "*.box" ! -name .gitignore -exec rm '{}' \; ; \
 		fi ; \
 	done
-	
+
 clean-output:
 	@for builder in $(BUILDER_TYPES) ; do \
 		echo Deleting output-$$builder-iso ; \
 		echo rm -rf output-$$builder-iso ; \
 	done
-	
+
 clean-packer-cache:
 	echo Deleting packer_cache
 	rm -rf packer_cache
@@ -259,15 +206,80 @@ clean-packer-cache:
 test-$(VMWARE_BOX_DIR)/%$(BOX_SUFFIX): $(VMWARE_BOX_DIR)/%$(BOX_SUFFIX)
 	rm -f ~/.ssh/known_hosts
 	bin/test-box.sh $< vmware_desktop vmware_fusion $(CURRENT_DIR)/test/*_spec.rb
-	
+
 test-$(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX): $(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX)
 	rm -f ~/.ssh/known_hosts
 	bin/test-box.sh $< virtualbox virtualbox $(CURRENT_DIR)/test/*_spec.rb
-	
+
+test-$(PARALLELS_BOX_DIR)/%$(BOX_SUFFIX): $(PARALLELS_BOX_DIR)/%$(BOX_SUFFIX)
+	rm -f ~/.ssh/known_hosts
+	bin/test-box.sh $< parallels parallels $(CURRENT_DIR)/test/*_spec.rb
+
+test: test-vmware test-virtualbox test-parallels
+test-vmware: $(addprefix test-,$(VMWARE_BOX_FILES))
+test-virtualbox: $(addprefix test-,$(VIRTUALBOX_BOX_FILES))
+test-parallels: $(addprefix test-,$(PARALLELS_BOX_FILES))
+
 ssh-$(VMWARE_BOX_DIR)/%$(BOX_SUFFIX): $(VMWARE_BOX_DIR)/%$(BOX_SUFFIX)
 	rm -f ~/.ssh/known_hosts
 	bin/ssh-box.sh $< vmware_desktop vmware_fusion $(CURRENT_DIR)/test/*_spec.rb
-	
+
 ssh-$(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX): $(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX)
 	rm -f ~/.ssh/known_hosts
-	bin/ssh-box.sh $< virtualbox virtualbox $(CURRENT_DIR)/test/*_spec.rb	
+	bin/ssh-box.sh $< virtualbox virtualbox $(CURRENT_DIR)/test/*_spec.rb
+
+ssh-$(PARALLELS_BOX_DIR)/%$(BOX_SUFFIX): $(PARALLELS_BOX_DIR)/%$(BOX_SUFFIX)
+	rm -f ~/.ssh/known_hosts
+	bin/ssh-box.sh $< parallels parallels $(CURRENT_DIR)/test/*_spec.rb
+
+S3_STORAGE_CLASS ?= REDUCED_REDUNDANCY
+S3_ALLUSERS_ID ?= uri=http://acs.amazonaws.com/groups/global/AllUsers
+
+s3cp-$(VMWARE_BOX_DIR)/%$(BOX_SUFFIX): $(VMWARE_BOX_DIR)/%$(BOX_SUFFIX)
+	@for i in {1..20}; do \
+		aws --profile $(AWS_PROFILE) s3 cp $< $(VMWARE_S3_BUCKET) --storage-class $(S3_STORAGE_CLASS) --grants full=$(S3_GRANT_ID) read=$(S3_ALLUSERS_ID) && break || sleep 62; \
+	done
+
+s3cp-$(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX): $(VIRTUALBOX_BOX_DIR)/%$(BOX_SUFFIX)
+	@for i in {1..20}; do \
+		aws --profile $(AWS_PROFILE) s3 cp $< $(VIRTUALBOX_S3_BUCKET) --storage-class $(S3_STORAGE_CLASS) --grants full=$(S3_GRANT_ID) read=$(S3_ALLUSERS_ID) && break || sleep 62; \
+	done
+
+s3cp-$(PARALLELS_BOX_DIR)/%$(BOX_SUFFIX): $(PARALLELS_BOX_DIR)/%$(BOX_SUFFIX)
+	@for i in {1..20}; do \
+		aws --profile $(AWS_PROFILE) s3 cp $< $(PARALLELS_S3_BUCKET) --storage-class $(S3_STORAGE_CLASS) --grants full=$(S3_GRANT_ID) read=$(S3_ALLUSERS_ID) && break || sleep 62; \
+	done
+
+s3cp-vmware: $(addprefix s3cp-,$(VMWARE_BOX_FILES))
+s3cp-virtualbox: $(addprefix s3cp-,$(VIRTUALBOX_BOX_FILES))
+s3cp-parallels: $(addprefix s3cp-,$(PARALLELS_BOX_FILES))
+
+ATLAS_NAME ?= boxcutter
+
+test-atlas: test-atlas-vmware test-atlas-virtualbox test-atlas-parallels
+test-atlas-vmware: $(addprefix test-atlas-,$(VMWARE_BOX_FILES))
+test-atlas-virtualbox: $(addprefix test-atlas-,$(VIRTUALBOX_BOX_FILES))
+test-atlas-parallels: $(addprefix test-atlas-,$(PARALLELS_BOX_FILES))
+
+test-atlas-$(VMWARE_BOX_DIR)%$(BOX_SUFFIX):
+	bin/test-vagrantcloud-box.sh boxcutter$* vmware_fusion vmware_desktop $(CURRENT_DIR)/test/*_spec.rb
+	bin/test-vagrantcloud-box.sh box-cutter$* vmware_fusion vmware_desktop $(CURRENT_DIR)/test/*_spec.rb
+
+test-atlas-$(VIRTUALBOX_BOX_DIR)%$(BOX_SUFFIX):
+	bin/test-vagrantcloud-box.sh boxcutter$* virtualbox virtualbox $(CURRENT_DIR)/test/*_spec.rb
+	bin/test-vagrantcloud-box.sh box-cutter$* virtualbox virtualbox $(CURRENT_DIR)/test/*_spec.rb
+
+test-atlas-$(PARALLELS_BOX_DIR)%$(BOX_SUFFIX):
+	bin/test-vagrantcloud-box.sh boxcutter$* parallels parallels $(CURRENT_DIR)/test/*_spec.rb
+	bin/test-vagrantcloud-box.sh box-cutter$* parallels parallels $(CURRENT_DIR)/test/*_spec.rb
+
+test-atlas: test-atlas-vmware test-atlas-virtualbox test-atlas-parallels
+test-atlas-vmware: $(addprefix test-atlas-,$(VMWARE_BOX_FILES))
+test-atlas-virtualbox: $(addprefix test-atlas-,$(VIRTUALBOX_BOX_FILES))
+test-atlas-parallels: $(addprefix test-atlas-,$(PARALLELS_BOX_FILES))
+
+register-atlas: $(addprefix register-atlas-,$(basename $(TEMPLATE_FILENAMES)))
+
+register-atlas/%$(BOX_SUFFIX):
+	bin/register_atlas.sh $* $(BOX_SUFFIX) $(BOX_VERSION)
+	bin/register_atlas_box_cutter.sh $* $(BOX_SUFFIX) $(BOX_VERSION)

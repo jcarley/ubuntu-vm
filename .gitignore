@@ -9,5 +9,6 @@ tmp
 *.swp
 Makefile.local
 Vagrantfile
-
+.tmpatlas/
 .DS_Store
+custom.sh
