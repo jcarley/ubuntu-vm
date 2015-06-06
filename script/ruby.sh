@@ -27,21 +27,6 @@ fancy_echo "Installing base ruby build dependencies ..."
 fancy_echo "Installing libraries for common gem dependencies ..."
   sudo aptitude install -y libxslt1-dev libcurl4-openssl-dev libksba8 libksba-dev libqtwebkit-dev libreadline-dev
 
-fancy_echo "Installing curl, for making web requests ..."
-  sudo aptitude install -y curl
-
-fancy_echo "Installing vim, for editing files on the server ..."
-  sudo aptitude install -y vim
-
-fancy_echo "Installing git, for source control management ..."
-  sudo aptitude install -y git
-
-fancy_echo "Installing Redis, a good key-value database ..."
-  sudo aptitude install -y redis-server
-
-fancy_echo "Installing node, to render the rails asset pipeline ..."
-  sudo aptitude install -y nodejs
-
 if [[ ! -d "$HOME/.rbenv" ]]; then
   fancy_echo "Installing rbenv, to change Ruby versions ..."
     git clone https://github.com/sstephenson/rbenv.git $HOME/.rbenv
